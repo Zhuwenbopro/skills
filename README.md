@@ -20,6 +20,14 @@
 
 用于验证 Skill 是否能被 Copilot 发现和调用的简单示例。
 
+### `compile-sglang`
+
+用于在 HCU/ROCm 环境中编译 HYGON-AI 的 SGLang fork，包含依赖、`sglang-kernel` 和 SGLang editable 安装：
+
+```text
+/compile-sglang 编译 SGLang
+```
+
 ## 使用方法
 
 ### 1. 将仓库放到工作区

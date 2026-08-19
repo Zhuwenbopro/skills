@@ -42,6 +42,10 @@ is_positive_integer() {
 : "${HEALTH_HOST:=127.0.0.1}"
 : "${SERVER_COMMAND:=server_command.sh}"
 : "${EVAL_COMMAND:=eval_command.sh}"
+: "${EVAL_ENABLE_THINKING:=false}"
+: "${EVAL_DATASETS:=math_500}"
+: "${EVAL_BATCH:=64}"
+: "${EVAL_LIMIT:=None}"
 : "${RESULT_ROOT:=eval_results}"
 : "${START_PORT:=30000}"
 : "${END_PORT:=30100}"
@@ -315,6 +319,7 @@ wait_for_server() {
 }
 
 start_eval() {
+  export EVAL_ENABLE_THINKING EVAL_DATASETS EVAL_BATCH EVAL_LIMIT
   setsid bash "$EVAL_COMMAND" >"$EVAL_LOG" 2>&1 &
   EVAL_PID=$!
   EVAL_PGID=$(get_process_group "$EVAL_PID")

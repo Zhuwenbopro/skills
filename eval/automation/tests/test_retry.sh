@@ -59,6 +59,10 @@ EOF
 cat >"$TEST_DIR/eval.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+[[ "${EVAL_DATASETS:-}" == "humaneval" ]]
+[[ "${EVAL_ENABLE_THINKING:-}" == "false" ]]
+[[ "${EVAL_BATCH:-}" == "7" ]]
+[[ "${EVAL_LIMIT:-}" == "None" ]]
 count_file="$TEST_STATE/eval_count"
 count=0
 [[ -f "$count_file" ]] && count=$(<"$count_file")
@@ -79,6 +83,10 @@ HOST="127.0.0.1"
 HEALTH_HOST="127.0.0.1"
 SERVER_COMMAND="$TEST_DIR/server_command.sh"
 EVAL_COMMAND="$TEST_DIR/eval.sh"
+EVAL_ENABLE_THINKING=false
+EVAL_DATASETS=humaneval
+EVAL_BATCH=7
+EVAL_LIMIT=None
 RESULT_ROOT="$TEST_DIR/results"
 START_PORT=31000
 END_PORT=31010

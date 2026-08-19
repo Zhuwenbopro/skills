@@ -13,7 +13,7 @@ export SGLANG_USE_AITER_AR=0
 export SGLANG_USE_BOLT_RECOMPUTE_W_U=0
 export SGLANG_USE_BOLT_MAMBA_STATE_SCATTER=0
 unset NCCL_TOPO_FILE
-sglang serve --model-path /models/qwen3.6/Qwen3.6-35B-A3B \
+sglang serve --model-path /models/Qwen3.6-35B-A3B \
     --attention-backend fa3 \
     --mem-fraction-static 0.9 \
     --tp-size 2 --pp-size 1 \

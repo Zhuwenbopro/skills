@@ -49,9 +49,21 @@ The user may provide:
    echo $!
    ```
 
-9. After the scheduler log shows both of these startup markers, stop monitoring and return control to the user:
+9. After starting the scheduler, wait with one blocking terminal watcher instead of repeatedly polling from the agent. The watcher must handle both successful startup and the first failed attempt. Return control to the agent as soon as the first failure marker appears; do not wait for the scheduler's later retries or its final retry limit. The scheduler may continue retrying in the background. Use a single command such as:
+
+   ```bash
+    tail -n 0 -F /home/eval_results/auto_eval.log | awk '
+       /SGLang 服务健康检查通过/ { health=1 }
+       /EvalScope 已启动/ { evalscope=1 }
+       health && evalscope { exit 0 }
+      /SGLang Server 启动失败|SGLang Server 启动超过|第 [0-9]+ 次尝试失败|评测期间 SGLang Server 意外退出|EvalScope 评测失败|已达到最大尝试次数|错误：/ { exit 1 }
+    '
+   ```
+
+    Run this watcher asynchronously and let terminal completion/notification resume the agent. Do not repeatedly call `grep`, `tail`, `ps`, `get_terminal_output`, or other status checks while it is waiting. If the watcher exits successfully, stop monitoring and return control to the user:
    - `SGLang 服务健康检查通过`
    - `EvalScope 已启动`
+   If it exits with failure, report the first failure marker and that the scheduler may continue retrying in the background. Do not wait for later retries, and do not report benchmark completion.
    Do not wait for benchmark completion, read intermediate `eval.log` output, or open generated reports during the initial run. Report the scheduler PID, result log, selected datasets, and that thinking is disabled.
 10. If the user asks for status, inspect the scheduler log and the latest run directory under `RESULT_ROOT`. Only then read progress logs or final reports. If the user asks to stop, send `TERM` to the scheduler PID; it will clean up the EvalScope process, SGLang process group, and GPU locks.
 

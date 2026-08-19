@@ -9,6 +9,9 @@
 `auto_eval.sh` 负责完整生命周期。`lib/server_command_parser.py` 是内部解析器，
 通常不需要修改。
 
+服务启动后，等待器默认每 2 秒请求一次 `/health`。一旦服务返回健康状态，
+会立即启动 EvalScope；可通过 `HEALTH_CHECK_INTERVAL` 覆盖该间隔。
+
 ## 服务命令的自动解析
 
 `server_command.sh` 支持以下两种启动形式：

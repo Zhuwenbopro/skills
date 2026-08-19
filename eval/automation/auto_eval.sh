@@ -50,7 +50,7 @@ is_positive_integer() {
 : "${START_PORT:=30000}"
 : "${END_PORT:=30100}"
 : "${SERVER_START_TIMEOUT:=600}"
-: "${HEALTH_CHECK_INTERVAL:=2}"
+: "${HEALTH_CHECK_INTERVAL:=20}"
 : "${GPU_VRAM_MAX_PERCENT:=5}"
 : "${GPU_HCU_MAX_PERCENT:=0}"
 : "${GPU_POLL_INTERVAL:=30}"
@@ -319,7 +319,7 @@ wait_for_server() {
 }
 
 start_eval() {
-  export EVAL_ENABLE_THINKING EVAL_DATASETS EVAL_BATCH EVAL_LIMIT
+  export EVAL_ENABLE_THINKING EVAL_DATASETS EVAL_BATCH EVAL_LIMIT EVAL_LOG
   setsid bash "$EVAL_COMMAND" >"$EVAL_LOG" 2>&1 &
   EVAL_PID=$!
   EVAL_PGID=$(get_process_group "$EVAL_PID")

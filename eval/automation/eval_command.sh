@@ -341,7 +341,7 @@ bwtype=$(hostname | sed 's/[0-9].*//' | tr -cd 'A-Za-z')
 current_time=$(date +"%Y%m%d_%H%M%S")
 logpath=${RUN_DIR:-"./${bwtype}_${model}/${current_time}"}
 mkdir -p "${logpath}"
-log_filename="${logpath}/eval_${current_time}.log"
+log_filename=${EVAL_LOG:-"${logpath}/eval_${current_time}.log"}
 
 limit_args=()
 case "${limit:-}" in
@@ -434,22 +434,8 @@ for cfg in "${cfgs[@]}"; do
         --work-dir "${logpath}"
     )
     [[ -z "$datasets_args" ]] || eval_args+=(--dataset-args "$datasets_args")
-    set +e
-    "${eval_args[@]}" \
-        2>&1 | tee -a "${log_filename}"
-    _pipe_status=("${PIPESTATUS[@]}")
-    set -e
-
-    if [[ "${_pipe_status[0]}" -ne 0 ]]; then
-        echo "错误: evalscope 评测失败 (exit=${_pipe_status[0]})，数据集: ${group_datasets[*]}" >&2
-        exit "${_pipe_status[0]}"
-    fi
-    if [[ "${_pipe_status[1]}" -ne 0 ]]; then
-        echo "错误: 写日志失败 (tee exit=${_pipe_status[1]})" >&2
-        exit "${_pipe_status[1]}"
-    fi
+    "${eval_args[@]}"
 done
-unset _pipe_status
 
 [[ -f "${log_filename}" ]] || die "日志文件 ${log_filename} 未创建"
 echo "基准测试完成"

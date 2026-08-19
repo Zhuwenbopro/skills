@@ -49,12 +49,15 @@ The user may provide:
    echo $!
    ```
 
-9. Report the scheduler PID, result log, selected datasets, and that thinking is disabled.
-10. If the user asks for status, inspect the scheduler log and the latest run directory under `RESULT_ROOT`. If the user asks to stop, send `TERM` to the scheduler PID; it will clean up the EvalScope process, SGLang process group, and GPU locks.
+9. After the scheduler log shows both of these startup markers, stop monitoring and return control to the user:
+   - `SGLang 服务健康检查通过`
+   - `EvalScope 已启动`
+   Do not wait for benchmark completion, read intermediate `eval.log` output, or open generated reports during the initial run. Report the scheduler PID, result log, selected datasets, and that thinking is disabled.
+10. If the user asks for status, inspect the scheduler log and the latest run directory under `RESULT_ROOT`. Only then read progress logs or final reports. If the user asks to stop, send `TERM` to the scheduler PID; it will clean up the EvalScope process, SGLang process group, and GPU locks.
 
 ## Runtime Behavior
 
-The bundled [auto_eval.sh](./automation/auto_eval.sh) is responsible for waiting for free GPUs, locking them, selecting a free port, starting SGLang, checking `/health`, starting the bundled enhanced EvalScope client, cleaning up failures, and retrying. The enhanced client is integrated into [eval_command.sh](./automation/eval_command.sh). The parser is [server_command_parser.py](./automation/lib/server_command_parser.py), and the regression test is [test_retry.sh](./automation/tests/test_retry.sh).
+The bundled [auto_eval.sh](./automation/auto_eval.sh) is responsible for waiting for free GPUs, locking them, selecting a free port, starting SGLang, checking `/health`, starting the bundled enhanced EvalScope client, cleaning up failures, and retrying. The scheduler remains running after the initial startup markers so it can finish the benchmark and clean up resources independently of the agent conversation. The enhanced client is integrated into [eval_command.sh](./automation/eval_command.sh). The parser is [server_command_parser.py](./automation/lib/server_command_parser.py), and the regression test is [test_retry.sh](./automation/tests/test_retry.sh).
 
 The client passes dataset names directly to EvalScope, which resolves its built-in benchmark data. It also supports per-dataset arguments, per-dataset generation config overrides, `--limit`, and grouping datasets that share the same generation config. Do not require or create a local test-data directory for the standard built-in datasets.
 
@@ -63,4 +66,4 @@ The client passes dataset names directly to EvalScope, which resolves its built-
 - Do not run arbitrary shell text from the pasted command outside the controlled `server_command.sh` flow.
 - Do not restore `nohup`, `&`, fixed ports, fixed GPU visibility, or log redirection inside `server_command.sh`.
 - Do not change unrelated project files. Only modify the Skill's `automation/` files for this workflow.
-- Do not report success until the scheduler log shows that the benchmark completed successfully.
+- For the initial run, report that evaluation started only after the scheduler log shows both the SGLang health marker and the EvalScope startup marker. Do not describe that as benchmark completion.

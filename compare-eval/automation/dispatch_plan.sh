@@ -7,6 +7,8 @@ PLAN_FILE=""
 CONFIG_FILE="${EVAL_AUTOMATION_DIR}/config.env"
 MAX_PARALLEL=0
 POLL_INTERVAL=15
+MAX_GPUS=8
+MAX_GPUS_OVERRIDE=""
 
 usage() {
   cat <<'EOF'
@@ -14,6 +16,7 @@ usage() {
 
 选项：
   --config PATH        auto_eval 共享配置，默认 eval/automation/config.env
+  --max-gpus N         只使用编号 0 到 N-1 的 GPU，默认 8
   --max-parallel N     最大并发任务数，0 表示不额外限制
   --poll-interval SEC  调度轮询间隔，默认 15
 EOF
@@ -27,6 +30,7 @@ while (($#)); do
   case "$1" in
     --plan) PLAN_FILE=${2:-}; shift 2 ;;
     --config) CONFIG_FILE=${2:-}; shift 2 ;;
+    --max-gpus) MAX_GPUS_OVERRIDE=${2:-}; shift 2 ;;
     --max-parallel) MAX_PARALLEL=${2:-}; shift 2 ;;
     --poll-interval) POLL_INTERVAL=${2:-}; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -82,11 +86,10 @@ PY
 # shellcheck source=/dev/null
 source "$CONFIG_FILE"
 : "${GPU_LOCK_DIR:=/tmp/auto_eval_gpu_locks}"
-: "${GPU_ALLOWLIST:=}"
 : "${GPU_VRAM_MAX_PERCENT:=6}"
 : "${GPU_HCU_MAX_PERCENT:=0}"
-GPU_ALLOWLIST=${GPU_ALLOWLIST//[[:space:]]/}
-[[ -z "$GPU_ALLOWLIST" || "$GPU_ALLOWLIST" =~ ^[0-9]+(,[0-9]+)*$ ]] || die "GPU_ALLOWLIST 格式错误"
+[[ -z "$MAX_GPUS_OVERRIDE" ]] || MAX_GPUS=$MAX_GPUS_OVERRIDE
+is_positive_integer "$MAX_GPUS" || die "MAX_GPUS 必须是正整数"
 mkdir -p "$GPU_LOCK_DIR"
 
 required_gpus() {
@@ -97,20 +100,32 @@ required_gpus() {
   printf '%s\n' "$((tp * pp))"
 }
 
-count_free_allowed_gpus() {
-  local output
+find_available_gpus() {
+  local required=$1 output gpu fd selected_csv
+  local -a selected=()
   output=$(rocm-smi 2>/dev/null) || return 1
-  awk -v max_vram="$GPU_VRAM_MAX_PERCENT" -v max_hcu="$GPU_HCU_MAX_PERCENT" \
-      -v allowed="$GPU_ALLOWLIST" '
-    BEGIN { n=split(allowed,a,","); for(i=1;i<=n;i++) ok[a[i]]=1 }
+  while IFS= read -r gpu; do
+    [[ -n "$gpu" ]] || continue
+    exec {fd}>"${GPU_LOCK_DIR}/gpu_${gpu}.lock"
+    if flock -n "$fd"; then
+      selected+=("$gpu")
+      flock -u "$fd"
+      exec {fd}>&-
+    else
+      exec {fd}>&-
+    fi
+    ((${#selected[@]} >= required)) && break
+  done < <(awk -v max_vram="$GPU_VRAM_MAX_PERCENT" -v max_hcu="$GPU_HCU_MAX_PERCENT" \
+      -v max_gpus="$MAX_GPUS" '
     $1 ~ /^[0-9]+$/ {
       gpu=$1; vram=$6; hcu=$7; gsub(/%/,"",vram); gsub(/%/,"",hcu)
-      if ((allowed=="" || gpu in ok) && (vram+0)<max_vram && (hcu+0)<=max_hcu) print gpu
-    }' <<<"$output" | while IFS= read -r gpu; do
-      exec {fd}>"${GPU_LOCK_DIR}/gpu_${gpu}.lock"
-      if flock -n "$fd"; then echo "$gpu"; flock -u "$fd"; fi
-      exec {fd}>&-
-    done | wc -l
+      if (gpu < max_gpus && (vram+0)<max_vram && (hcu+0)<=max_hcu) print gpu
+    }' <<<"$output")
+  if ((${#selected[@]} < required)); then
+    return 1
+  fi
+  selected_csv=$(IFS=,; printf '%s' "${selected[*]}")
+  GPU_ALLOWLIST=$selected_csv
 }
 
 active_count() {
@@ -150,7 +165,8 @@ launch_task() {
   (
     set +e
     AUTO_EVAL_CONFIG="$CONFIG_FILE" bash "$EVAL_AUTOMATION_DIR/auto_eval.sh" \
-      --server-command "$command" --result-root "$result_root" >"$task_dir/auto_eval.log" 2>&1
+      --server-command "$command" --result-root "$result_root" \
+      --gpu-allowlist "$GPU_ALLOWLIST" >"$task_dir/auto_eval.log" 2>&1
     status=$?
     awk -F'PID=' '/评测 worker 已启动：PID=/{split($2,a,"；"); print a[1]; exit}' "$task_dir/auto_eval.log" >"$task_dir/worker.pid"
     printf '%s\n' "$status" >"$task_dir/launcher.exit"
@@ -164,18 +180,19 @@ launch_task() {
   log "已安排 $label，worker PID=$(<"$task_dir/worker.pid")"
 }
 
-log "开始调度 ${#TASK_ROWS[@]} 个对照任务；GPU_ALLOWLIST=${GPU_ALLOWLIST:-全部}"
+log "开始调度 ${#TASK_ROWS[@]} 个对照任务；可用 GPU 编号范围=0-$((MAX_GPUS - 1))"
 for row in "${TASK_ROWS[@]}"; do
   IFS=$'\t' read -r label command result_root <<<"$row"
   [[ -f "$command" ]] || die "服务命令不存在：$command"
   need=$(required_gpus "$command") || die "命令校验失败：$label"
+  ((need <= MAX_GPUS)) || die "$label 需要 $need 张 GPU，超过 MAX_GPUS=$MAX_GPUS"
   while true; do
     active=$(active_count)
-    free=$(count_free_allowed_gpus || echo 0)
-    if (( (MAX_PARALLEL == 0 || active < MAX_PARALLEL) && free >= need )); then break; fi
-    log "等待安排 $label：需要 GPU=$need，当前可锁空闲 GPU=$free，活跃任务=$active"
+    if ((MAX_PARALLEL == 0 || active < MAX_PARALLEL)) && find_available_gpus "$need"; then break; fi
+    log "等待安排 $label：需要 GPU=$need，可用编号范围=0-$((MAX_GPUS - 1))，活跃任务=$active"
     sleep "$POLL_INTERVAL"
   done
+  log "为 $label 指定 GPU 候选范围=${GPU_ALLOWLIST}"
   launch_task "$label" "$command" "$result_root"
   write_status
 done

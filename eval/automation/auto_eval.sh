@@ -6,6 +6,7 @@ CONFIG_FILE=${AUTO_EVAL_CONFIG:-"${SCRIPT_DIR}/config.env"}
 
 SERVER_COMMAND_OVERRIDE=""
 RESULT_ROOT_OVERRIDE=""
+GPU_ALLOWLIST_OVERRIDE=""
 
 usage() {
   cat <<'EOF'
@@ -14,6 +15,7 @@ usage() {
 选项：
   --server-command PATH  覆盖配置中的 SERVER_COMMAND
   --result-root PATH     覆盖配置中的 RESULT_ROOT
+  --gpu-allowlist CSV    只从指定 GPU 中申请，例如 1,4
   -h, --help             显示帮助
 EOF
 }
@@ -28,6 +30,11 @@ while (($#)); do
     --result-root)
       (($# >= 2)) && [[ -n "$2" ]] || { echo "错误：--result-root 需要路径" >&2; exit 2; }
       RESULT_ROOT_OVERRIDE=$2
+      shift 2
+      ;;
+    --gpu-allowlist)
+      (($# >= 2)) && [[ -n "$2" ]] || { echo "错误：--gpu-allowlist 需要逗号分隔的 GPU 编号" >&2; exit 2; }
+      GPU_ALLOWLIST_OVERRIDE=$2
       shift 2
       ;;
     -h|--help) usage; exit 0 ;;
@@ -95,6 +102,7 @@ is_positive_integer() {
 
 [[ -z "$SERVER_COMMAND_OVERRIDE" ]] || SERVER_COMMAND=$SERVER_COMMAND_OVERRIDE
 [[ -z "$RESULT_ROOT_OVERRIDE" ]] || RESULT_ROOT=$RESULT_ROOT_OVERRIDE
+[[ -z "$GPU_ALLOWLIST_OVERRIDE" ]] || GPU_ALLOWLIST=$GPU_ALLOWLIST_OVERRIDE
 
 SERVER_COMMAND=$(resolve_from_script_dir "$SERVER_COMMAND")
 EVAL_COMMAND=$(resolve_from_script_dir "$EVAL_COMMAND")

@@ -89,7 +89,7 @@ GPU_VRAM_MAX_PERCENT=5
 GPU_HCU_MAX_PERCENT=0
 GPU_POLL_INTERVAL=1
 GPU_CONFIRM_SECONDS=0
-GPU_ALLOWLIST=""
+GPU_ALLOWLIST="7"
 MAX_ATTEMPTS=4
 SHUTDOWN_TIMEOUT=2
 FAILURE_LOG_LINES=10
@@ -101,7 +101,8 @@ TEST_STATE="$TEST_DIR/state" \
 AUTO_EVAL_CONFIG="$TEST_DIR/config.env" \
   bash "$PROJECT_DIR/auto_eval.sh" \
     --server-command "$TEST_DIR/server_command.sh" \
-    --result-root "$TEST_DIR/results" >"$TEST_DIR/runner.log" 2>&1 &
+    --result-root "$TEST_DIR/results" \
+    --gpu-allowlist 0 >"$TEST_DIR/runner.log" 2>&1 &
 RUNNER_PID=$!
 
 deadline=$((SECONDS + 15))

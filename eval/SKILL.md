@@ -17,6 +17,7 @@ Treat the automation as a black box during normal invocation. The documented int
 - validation: `lib/server_command_parser.py metadata`
 - entry point: `auto_eval.sh`
 - per-run overrides: `auto_eval.sh --server-command PATH --result-root PATH`; command-line values override `config.env`
+- GPU candidate override: `auto_eval.sh --gpu-allowlist CSV`; the scheduler only searches and locks within this exact list
 - status: `/home/eval_results/auto_eval.log`
 
 Do not read `auto_eval.sh`, `eval_command.sh`, the parser implementation, tests, or generated logs before they are needed by the procedure below. Inspect implementation files only when the documented interface fails, behavior contradicts this document, or the user explicitly asks to debug the automation.

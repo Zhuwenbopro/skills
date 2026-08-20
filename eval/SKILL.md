@@ -7,27 +7,39 @@ user-invocable: true
 
 # SGLang Auto Evaluation
 
-Use the self-contained automation under [automation](./automation/) to run the benchmark. Do not execute the pasted SGLang command directly. The Skill's automation directory must be used so the workflow also works in a new container.
+Run SGLang benchmarks through the self-contained [automation](./automation/) interface. Never execute the user's pasted launch command directly.
+
+## Interface Contract
+
+Treat the automation as a black box during normal invocation. The documented interface consists of:
+
+- inputs: `server_command.sh` and the request fields in `config.env`
+- validation: `lib/server_command_parser.py metadata`
+- entry point: `auto_eval.sh`
+- status: `/home/eval_results/auto_eval.log`
+
+Do not read `auto_eval.sh`, `eval_command.sh`, the parser implementation, tests, or generated logs before they are needed by the procedure below. Inspect implementation files only when the documented interface fails, behavior contradicts this document, or the user explicitly asks to debug the automation.
 
 ## Input
 
 The user may provide:
 
-- A fenced SGLang launch command containing `export`, `unset`, and `sglang serve` lines.
+- A fenced SGLang launch command containing optional `export` or `unset` lines and one `sglang serve` or `python -m sglang.launch_server` command.
 - A dataset name or comma-separated dataset list, for example `math500` or `humaneval,math500,gsm8k`.
 - An optional request to enable thinking. Thinking is disabled by default.
 
 ## Procedure
 
-1. Set `AUTOMATION_DIR` to the Skill's `./automation` directory, containing `auto_eval.sh`, `config.env`, `server_command.sh`, `eval_command.sh`, `lib/server_command_parser.py`, and `tests/test_retry.sh`.
-2. Extract the complete SGLang command from the user's fenced code block and write it to `${AUTOMATION_DIR}/server_command.sh`.
-3. Preserve environment assignments and the SGLang arguments, but remove command-wrapper syntax from the pasted command:
+1. Set `AUTOMATION_DIR` to this Skill's `./automation` directory. Do not search for or copy the automation elsewhere.
+2. Extract the complete SGLang command from the user's fenced block and write it to `${AUTOMATION_DIR}/server_command.sh`.
+3. Preserve environment assignments, `unset NAME` statements, and SGLang arguments, except for scheduler-owned settings. Normalize the command as follows:
    - remove `nohup`
    - remove trailing `&`
    - remove output redirection such as `>file 2>&1`
-   - do not add a fixed port or fixed `HIP_VISIBLE_DEVICES`
-4. Keep `unset NAME` lines. The bundled parser supports them and removes those variables before starting SGLang.
-5. Validate the command before starting anything:
+   - remove `--port` and its value
+   - remove `HIP_VISIBLE_DEVICES` assignments
+   - do not add replacement values for the port or GPU visibility; the scheduler selects both
+4. Validate the command before starting anything:
 
    ```bash
    cd "${AUTOMATION_DIR}"
@@ -35,12 +47,12 @@ The user may provide:
    ```
 
    Stop and report the parser error if the command is invalid.
-6. Normalize common dataset spelling for EvalScope. In particular, use `math_500` for a user request written as `math500` unless the local EvalScope installation explicitly uses another registered name.
-7. Update `${AUTOMATION_DIR}/config.env` for this request:
+5. Normalize common dataset spelling for EvalScope. In particular, map `math500` to `math_500`. Do not probe EvalScope or create local test data for standard built-in datasets.
+6. Update only these request fields in `${AUTOMATION_DIR}/config.env`:
    - `EVAL_DATASETS` is the normalized comma-separated dataset list.
    - `EVAL_ENABLE_THINKING` is `false` unless the user explicitly asks for `true`.
    - Preserve existing `EVAL_BATCH` and `EVAL_LIMIT` unless the user changes them.
-8. Start the scheduler from outside `server_command.sh`. Use a result log outside the server command, for example:
+7. Start the scheduler from outside `server_command.sh`. Keep scheduler redirection outside the controlled server command:
 
    ```bash
    mkdir -p /home/eval_results
@@ -49,33 +61,33 @@ The user may provide:
    echo $!
    ```
 
-9. After starting the scheduler, wait with one blocking terminal watcher instead of repeatedly polling from the agent. The parent scheduler retries only while it cannot lock the required GPUs. Once GPUs are locked, it starts one worker and exits; the worker runs exactly one server/evaluation lifecycle and never retries the lifecycle. Use a single command such as:
+8. Start exactly one asynchronous watcher. It must observe both existing and future log lines so that fast startup markers cannot be missed:
 
    ```bash
-    tail -n 0 -F /home/eval_results/auto_eval.log | awk '
+    tail -n +1 -F /home/eval_results/auto_eval.log | awk '
        /SGLang 服务健康检查通过/ { health=1 }
        /EvalScope 已启动/ { evalscope=1 }
        health && evalscope { exit 0 }
-      /SGLang Server 启动失败|SGLang Server 启动超过|评测期间 SGLang Server 意外退出|EvalScope 评测失败|已达到最大尝试次数|错误：/ { exit 1 }
+       /SGLang Server 启动失败|SGLang Server 启动超过|评测期间 SGLang Server 意外退出|EvalScope 评测失败|已达到最大尝试次数|错误：/ { exit 1 }
     '
    ```
 
-    Run this watcher asynchronously and let terminal completion/notification resume the agent. Do not repeatedly call `grep`, `tail`, `ps`, `get_terminal_output`, or other status checks while it is waiting. If the watcher exits successfully, stop monitoring and return control to the user:
-   - `SGLang 服务健康检查通过`
-   - `EvalScope 已启动`
-   If it exits with failure, report the first failure marker. There is no later lifecycle retry.
-   Do not wait for benchmark completion, read intermediate `eval.log` output, or open generated reports during the initial run. Report the worker PID, result log, selected datasets, and that thinking is disabled.
-10. If the user asks for status, inspect the worker log and the latest run directory under `RESULT_ROOT`. Only then read progress logs or final reports. If the user asks to stop, send `TERM` to the worker PID; it will clean up the EvalScope process, SGLang process group, and GPU locks.
+   Let terminal completion notification resume the agent. While waiting, do not poll with `grep`, `tail`, `ps`, `get_terminal_output`, or equivalent commands.
+9. Handle the watcher result:
+   - Success means only that the server passed its health check and EvalScope started. Report the worker PID, result log, datasets, and thinking setting, then return control immediately.
+   - Failure means the lifecycle will not retry. Read the scheduler log once, report the first failure marker and its relevant error, then return control.
+   - Do not wait for benchmark completion or inspect intermediate reports during a successful initial start.
+10. On a later status request, inspect the scheduler log and latest run directory under `RESULT_ROOT`. On a stop request, send `TERM` to the worker PID so it can clean up EvalScope, the SGLang process group, and GPU locks.
 
 ## Runtime Behavior
 
-The bundled [auto_eval.sh](./automation/auto_eval.sh) waits for free GPUs and locks them. It then starts one worker and exits; the worker selects a port, starts SGLang, checks `/health`, starts the bundled enhanced EvalScope client, and cleans up the one lifecycle. GPU acquisition may retry indefinitely when `MAX_ATTEMPTS=0`; service or evaluation failure does not restart the lifecycle. The enhanced client is integrated into [eval_command.sh](./automation/eval_command.sh). The parser is [server_command_parser.py](./automation/lib/server_command_parser.py), and the regression test is [test_retry.sh](./automation/tests/test_retry.sh).
+The scheduler waits for free GPUs, locks them, starts one worker, and exits. The worker selects a port, starts SGLang, checks `/health`, starts EvalScope, and cleans up the lifecycle. GPU acquisition may retry indefinitely when `MAX_ATTEMPTS=0`; service or evaluation failure never restarts the lifecycle.
 
-The client passes dataset names directly to EvalScope, which resolves its built-in benchmark data. It also supports per-dataset arguments, per-dataset generation config overrides, `--limit`, and grouping datasets that share the same generation config. Do not require or create a local test-data directory for the standard built-in datasets.
+Dataset names are passed directly to EvalScope, which resolves built-in benchmark data. The bundled client supports per-dataset arguments, generation overrides, `--limit`, and grouping datasets that share generation settings.
 
 ## Safety and Scope
 
 - Do not run arbitrary shell text from the pasted command outside the controlled `server_command.sh` flow.
-- Do not restore `nohup`, `&`, fixed ports, fixed GPU visibility, or log redirection inside `server_command.sh`.
+- Do not place `nohup`, `&`, fixed ports, fixed GPU visibility, pipes, command substitutions, or log redirection in `server_command.sh`.
 - Do not change unrelated project files. Only modify the Skill's `automation/` files for this workflow.
 - For the initial run, report that evaluation started only after the scheduler log shows both the SGLang health marker and the EvalScope startup marker. Do not describe that as benchmark completion.

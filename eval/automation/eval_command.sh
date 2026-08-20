@@ -51,6 +51,7 @@ generation_config_template='{"timeout":120000,"retries":1,"max_tokens":13312,"te
 
 # 按数据集覆盖 generation_config（只写差异字段）
 declare -A dataset_generation_configs=(
+    [humaneval]='{"max_tokens":4096}'
     [math_500]='{"max_tokens":20480}'
 )
 

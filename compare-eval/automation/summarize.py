@@ -48,7 +48,10 @@ def main() -> None:
         task_dir = run_root / "tasks" / label
         log_path = task_dir / "auto_eval.log"
         log = log_path.read_text(encoding="utf-8", errors="replace") if log_path.is_file() else ""
-        reports = report_files(run_root / "results" / label)
+        result_root = Path(variant.get("result_root", Path("results") / label))
+        if not result_root.is_absolute():
+            result_root = run_root / result_root
+        reports = report_files(result_root)
         metrics = []
         for path in reports:
             try:
@@ -95,7 +98,9 @@ def main() -> None:
             all_terminal = False
         rows.append({
             "label": label,
-            "parameters": variant["parameters"],
+            "parameters": variant.get("parameters", {}),
+            "server_command": variant["server_command"],
+            "result_root": str(result_root),
             "state": state,
             "failure": failure,
             "metrics": metrics,

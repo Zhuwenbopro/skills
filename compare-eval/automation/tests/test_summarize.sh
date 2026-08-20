@@ -11,8 +11,8 @@ cat >"$TEST_DIR/plan.json" <<EOF
 {
   "variant_count": 2,
   "variants": [
-    {"label": "a", "parameters": {"FEATURE": "0"}, "server_command": "$TEST_DIR/a.sh"},
-    {"label": "b", "parameters": {"FEATURE": "1"}, "server_command": "$TEST_DIR/b.sh"}
+    {"label": "a", "parameters": {"FEATURE": "0"}, "server_command": "$TEST_DIR/a.sh", "result_root": "results/a"},
+    {"label": "b", "parameters": {"FEATURE": "1"}, "server_command": "$TEST_DIR/b.sh", "result_root": "results/b"}
   ]
 }
 EOF

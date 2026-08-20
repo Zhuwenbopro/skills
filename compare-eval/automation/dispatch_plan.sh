@@ -4,20 +4,18 @@ set -Eeuo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 EVAL_AUTOMATION_DIR=${EVAL_AUTOMATION_DIR:-"${SCRIPT_DIR}/../../eval/automation"}
 PLAN_FILE=""
-BASE_CONFIG="${EVAL_AUTOMATION_DIR}/config.env"
-GPU_ALLOWLIST_OVERRIDE=""
+CONFIG_FILE="${EVAL_AUTOMATION_DIR}/config.env"
 MAX_PARALLEL=0
 POLL_INTERVAL=15
 
 usage() {
   cat <<'EOF'
-用法：dispatch_matrix.sh --plan PLAN.json [选项]
+用法：dispatch_plan.sh --plan PLAN.json [选项]
 
 选项：
-  --base-config PATH       auto_eval 基础配置，默认 eval/automation/config.env
-  --gpu-allowlist CSV      覆盖基础配置中的 GPU_ALLOWLIST
-  --max-parallel N         最大并发任务数，0 表示不额外限制
-  --poll-interval SEC      调度轮询间隔，默认 15
+  --config PATH        auto_eval 共享配置，默认 eval/automation/config.env
+  --max-parallel N     最大并发任务数，0 表示不额外限制
+  --poll-interval SEC  调度轮询间隔，默认 15
 EOF
 }
 
@@ -28,8 +26,7 @@ is_positive_integer() { [[ "$1" =~ ^[1-9][0-9]*$ ]]; }
 while (($#)); do
   case "$1" in
     --plan) PLAN_FILE=${2:-}; shift 2 ;;
-    --base-config) BASE_CONFIG=${2:-}; shift 2 ;;
-    --gpu-allowlist) GPU_ALLOWLIST_OVERRIDE=${2:-}; shift 2 ;;
+    --config) CONFIG_FILE=${2:-}; shift 2 ;;
     --max-parallel) MAX_PARALLEL=${2:-}; shift 2 ;;
     --poll-interval) POLL_INTERVAL=${2:-}; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -38,15 +35,14 @@ while (($#)); do
 done
 
 [[ -n "$PLAN_FILE" && -f "$PLAN_FILE" ]] || die "--plan 指定的计划文件不存在"
-[[ -f "$BASE_CONFIG" ]] || die "基础配置不存在：$BASE_CONFIG"
-[[ -x "$EVAL_AUTOMATION_DIR/auto_eval.sh" || -f "$EVAL_AUTOMATION_DIR/auto_eval.sh" ]] || \
-  die "找不到 auto_eval.sh：$EVAL_AUTOMATION_DIR"
+[[ -f "$CONFIG_FILE" ]] || die "共享配置不存在：$CONFIG_FILE"
+[[ -f "$EVAL_AUTOMATION_DIR/auto_eval.sh" ]] || die "找不到 auto_eval.sh：$EVAL_AUTOMATION_DIR"
 is_nonnegative_integer "$MAX_PARALLEL" || die "--max-parallel 必须是非负整数"
 is_positive_integer "$POLL_INTERVAL" || die "--poll-interval 必须是正整数"
-for cmd in python3 flock; do command -v "$cmd" >/dev/null 2>&1 || die "找不到命令：$cmd"; done
+for cmd in python3 flock rocm-smi; do command -v "$cmd" >/dev/null 2>&1 || die "找不到命令：$cmd"; done
 
 PLAN_FILE=$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$PLAN_FILE")
-BASE_CONFIG=$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$BASE_CONFIG")
+CONFIG_FILE=$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$CONFIG_FILE")
 RUN_ROOT=$(dirname "$PLAN_FILE")
 TASK_ROOT="$RUN_ROOT/tasks"
 STATUS_FILE="$RUN_ROOT/status.tsv"
@@ -57,44 +53,41 @@ exec >>"$DISPATCH_LOG" 2>&1
 log() { printf '[%s] %s\n' "$(date '+%m-%d %H:%M:%S')" "$*"; }
 
 mapfile -t TASK_ROWS < <(python3 - "$PLAN_FILE" <<'PY'
-import json, sys
-plan = json.load(open(sys.argv[1], encoding="utf-8"))
+import json, os, sys
+from pathlib import Path
+
+plan_path = Path(sys.argv[1])
+plan = json.loads(plan_path.read_text(encoding="utf-8"))
+seen = set()
+seen_results = set()
 for item in plan.get("variants", []):
     label = item["label"]
-    command = item["server_command"]
-    if any(char in label for char in "\t\r\n") or any(char in command for char in "\t\r\n"):
-        raise SystemExit("计划含非法制表符或换行")
-    print(f"{label}\t{command}")
+    command = os.path.abspath(os.path.join(plan_path.parent, item["server_command"]))
+    result = os.path.abspath(os.path.join(plan_path.parent, item["result_root"]))
+    if label in seen:
+        raise SystemExit(f"计划含重复 label：{label}")
+    if not label or "/" in label or any(c in label for c in "\t\r\n"):
+        raise SystemExit(f"计划含非法 label：{label!r}")
+    if any(c in command + result for c in "\t\r\n"):
+        raise SystemExit("计划路径含非法制表符或换行")
+    if result in seen_results:
+      raise SystemExit(f"计划含重复 result_root：{result}")
+    seen.add(label)
+    seen_results.add(result)
+    print(f"{label}\t{command}\t{result}")
 PY
 )
 ((${#TASK_ROWS[@]} > 0)) || die "计划中没有任务"
 
 # shellcheck source=/dev/null
-source "$BASE_CONFIG"
-: "${RESULT_ROOT:=/home/eval_results}"
+source "$CONFIG_FILE"
 : "${GPU_LOCK_DIR:=/tmp/auto_eval_gpu_locks}"
 : "${GPU_ALLOWLIST:=}"
-: "${EVAL_DATASETS:=math_500}"
-: "${EVAL_ENABLE_THINKING:=false}"
-: "${EVAL_BATCH:=64}"
-: "${EVAL_LIMIT:=None}"
-: "${EVAL_COMMAND:=${EVAL_AUTOMATION_DIR}/eval_command.sh}"
-[[ -n "$GPU_ALLOWLIST_OVERRIDE" ]] && GPU_ALLOWLIST=$GPU_ALLOWLIST_OVERRIDE
+: "${GPU_VRAM_MAX_PERCENT:=6}"
+: "${GPU_HCU_MAX_PERCENT:=0}"
 GPU_ALLOWLIST=${GPU_ALLOWLIST//[[:space:]]/}
-[[ -z "$GPU_ALLOWLIST" || "$GPU_ALLOWLIST" =~ ^[0-9]+(,[0-9]+)*$ ]] || die "GPU allowlist 格式错误"
-
-PLAN_RESULT_ROOT="$RUN_ROOT/results"
-mkdir -p "$PLAN_RESULT_ROOT" "$GPU_LOCK_DIR"
-
-variant_field() {
-  python3 - "$PLAN_FILE" "$1" "$2" <<'PY'
-import json, sys
-plan = json.load(open(sys.argv[1], encoding="utf-8"))
-label, field = sys.argv[2:]
-item = next(v for v in plan["variants"] if v["label"] == label)
-print(item[field])
-PY
-}
+[[ -z "$GPU_ALLOWLIST" || "$GPU_ALLOWLIST" =~ ^[0-9]+(,[0-9]+)*$ ]] || die "GPU_ALLOWLIST 格式错误"
+mkdir -p "$GPU_LOCK_DIR"
 
 required_gpus() {
   local command=$1 metadata tp pp
@@ -107,7 +100,7 @@ required_gpus() {
 count_free_allowed_gpus() {
   local output
   output=$(rocm-smi 2>/dev/null) || return 1
-  awk -v max_vram="${GPU_VRAM_MAX_PERCENT:-6}" -v max_hcu="${GPU_HCU_MAX_PERCENT:-0}" \
+  awk -v max_vram="$GPU_VRAM_MAX_PERCENT" -v max_hcu="$GPU_HCU_MAX_PERCENT" \
       -v allowed="$GPU_ALLOWLIST" '
     BEGIN { n=split(allowed,a,","); for(i=1;i<=n;i++) ok[a[i]]=1 }
     $1 ~ /^[0-9]+$/ {
@@ -131,14 +124,14 @@ active_count() {
 }
 
 write_status() {
-  local row label task_dir pid state exit_code="" worker_pid=""
+  local row label task_dir pid state exit_code worker_pid
   printf 'label\tstate\tlauncher_pid\tworker_pid\texit_code\tlog\n' >"$STATUS_FILE.tmp"
   for row in "${TASK_ROWS[@]}"; do
-    IFS=$'\t' read -r label _ <<<"$row"
+    IFS=$'\t' read -r label _ _ <<<"$row"
     task_dir="$TASK_ROOT/$label"
-    pid=""; state="pending"
+    pid=""; state="pending"; exit_code=""; worker_pid=""
     [[ -f "$task_dir/launcher.pid" ]] && pid=$(<"$task_dir/launcher.pid")
-    [[ -f "$task_dir/worker.pid" ]] && worker_pid=$(<"$task_dir/worker.pid") || worker_pid=""
+    [[ -f "$task_dir/worker.pid" ]] && worker_pid=$(<"$task_dir/worker.pid")
     if [[ -f "$task_dir/launcher.exit" ]]; then
       exit_code=$(<"$task_dir/launcher.exit")
       state=$([[ "$exit_code" == 0 ]] && echo scheduled || echo launch_failed)
@@ -151,25 +144,13 @@ write_status() {
 }
 
 launch_task() {
-  local label=$1 command=$2 task_dir config launcher_pid
+  local label=$1 command=$2 result_root=$3 task_dir launcher_pid
   task_dir="$TASK_ROOT/$label"
   mkdir -p "$task_dir"
-  config="$task_dir/config.env"
-  cp "$BASE_CONFIG" "$config"
-  cat >>"$config" <<EOF
-SERVER_COMMAND=$(printf '%q' "$command")
-EVAL_COMMAND=$(printf '%q' "$EVAL_COMMAND")
-RESULT_ROOT=$(printf '%q' "$PLAN_RESULT_ROOT/$label")
-EVAL_DATASETS=$(printf '%q' "$EVAL_DATASETS")
-EVAL_ENABLE_THINKING=$(printf '%q' "$EVAL_ENABLE_THINKING")
-EVAL_BATCH=$(printf '%q' "$EVAL_BATCH")
-EVAL_LIMIT=$(printf '%q' "$EVAL_LIMIT")
-GPU_ALLOWLIST=$(printf '%q' "$GPU_ALLOWLIST")
-GPU_LOCK_DIR=$(printf '%q' "$GPU_LOCK_DIR")
-EOF
   (
     set +e
-    AUTO_EVAL_CONFIG="$config" bash "$EVAL_AUTOMATION_DIR/auto_eval.sh" >"$task_dir/auto_eval.log" 2>&1
+    AUTO_EVAL_CONFIG="$CONFIG_FILE" bash "$EVAL_AUTOMATION_DIR/auto_eval.sh" \
+      --server-command "$command" --result-root "$result_root" >"$task_dir/auto_eval.log" 2>&1
     status=$?
     awk -F'PID=' '/评测 worker 已启动：PID=/{split($2,a,"；"); print a[1]; exit}' "$task_dir/auto_eval.log" >"$task_dir/worker.pid"
     printf '%s\n' "$status" >"$task_dir/launcher.exit"
@@ -185,18 +166,19 @@ EOF
 
 log "开始调度 ${#TASK_ROWS[@]} 个对照任务；GPU_ALLOWLIST=${GPU_ALLOWLIST:-全部}"
 for row in "${TASK_ROWS[@]}"; do
-  IFS=$'\t' read -r label command <<<"$row"
+  IFS=$'\t' read -r label command result_root <<<"$row"
+  [[ -f "$command" ]] || die "服务命令不存在：$command"
   need=$(required_gpus "$command") || die "命令校验失败：$label"
   while true; do
     active=$(active_count)
     free=$(count_free_allowed_gpus || echo 0)
     if (( (MAX_PARALLEL == 0 || active < MAX_PARALLEL) && free >= need )); then break; fi
-    log "等待安排 $label：需要 GPU=$need，当前可锁空闲 GPU=$free，并发等待器=$active"
+    log "等待安排 $label：需要 GPU=$need，当前可锁空闲 GPU=$free，活跃任务=$active"
     sleep "$POLL_INTERVAL"
   done
-  launch_task "$label" "$command"
+  launch_task "$label" "$command" "$result_root"
   write_status
- done
+done
 
 write_status
 log "所有任务均已提交给 auto_eval；调度器退出"

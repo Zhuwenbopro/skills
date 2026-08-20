@@ -4,6 +4,37 @@ set -Eeuo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 CONFIG_FILE=${AUTO_EVAL_CONFIG:-"${SCRIPT_DIR}/config.env"}
 
+SERVER_COMMAND_OVERRIDE=""
+RESULT_ROOT_OVERRIDE=""
+
+usage() {
+  cat <<'EOF'
+用法：auto_eval.sh [选项]
+
+选项：
+  --server-command PATH  覆盖配置中的 SERVER_COMMAND
+  --result-root PATH     覆盖配置中的 RESULT_ROOT
+  -h, --help             显示帮助
+EOF
+}
+
+while (($#)); do
+  case "$1" in
+    --server-command)
+      (($# >= 2)) && [[ -n "$2" ]] || { echo "错误：--server-command 需要路径" >&2; exit 2; }
+      SERVER_COMMAND_OVERRIDE=$2
+      shift 2
+      ;;
+    --result-root)
+      (($# >= 2)) && [[ -n "$2" ]] || { echo "错误：--result-root 需要路径" >&2; exit 2; }
+      RESULT_ROOT_OVERRIDE=$2
+      shift 2
+      ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "错误：未知参数：$1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
 if [[ ! -f "$CONFIG_FILE" ]]; then
   echo "错误：配置文件不存在：$CONFIG_FILE" >&2
   exit 2
@@ -61,6 +92,9 @@ is_positive_integer() {
 : "${FAILURE_LOG_LINES:=100}"
 : "${GPU_LOCK_DIR:=/tmp/auto_eval_gpu_locks}"
 : "${PORT_LOCK_DIR:=/tmp/auto_eval_port_locks}"
+
+[[ -z "$SERVER_COMMAND_OVERRIDE" ]] || SERVER_COMMAND=$SERVER_COMMAND_OVERRIDE
+[[ -z "$RESULT_ROOT_OVERRIDE" ]] || RESULT_ROOT=$RESULT_ROOT_OVERRIDE
 
 SERVER_COMMAND=$(resolve_from_script_dir "$SERVER_COMMAND")
 EVAL_COMMAND=$(resolve_from_script_dir "$EVAL_COMMAND")

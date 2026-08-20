@@ -74,13 +74,13 @@ chmod +x "$TEST_DIR/bin/rocm-smi" "$TEST_DIR/bin/curl" \
 cat >"$TEST_DIR/config.env" <<EOF
 HOST="127.0.0.1"
 HEALTH_HOST="127.0.0.1"
-SERVER_COMMAND="$TEST_DIR/server_command.sh"
+SERVER_COMMAND="$TEST_DIR/missing-server-command.sh"
 EVAL_COMMAND="$TEST_DIR/eval.sh"
 EVAL_ENABLE_THINKING=false
 EVAL_DATASETS=humaneval
 EVAL_BATCH=7
 EVAL_LIMIT=None
-RESULT_ROOT="$TEST_DIR/results"
+RESULT_ROOT="$TEST_DIR/wrong-results"
 START_PORT=31000
 END_PORT=31010
 SERVER_START_TIMEOUT=5
@@ -99,7 +99,9 @@ EOF
 PATH="$TEST_DIR/bin:$PATH" \
 TEST_STATE="$TEST_DIR/state" \
 AUTO_EVAL_CONFIG="$TEST_DIR/config.env" \
-  bash "$PROJECT_DIR/auto_eval.sh" >"$TEST_DIR/runner.log" 2>&1 &
+  bash "$PROJECT_DIR/auto_eval.sh" \
+    --server-command "$TEST_DIR/server_command.sh" \
+    --result-root "$TEST_DIR/results" >"$TEST_DIR/runner.log" 2>&1 &
 RUNNER_PID=$!
 
 deadline=$((SECONDS + 15))

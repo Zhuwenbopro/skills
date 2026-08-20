@@ -9,6 +9,10 @@
 `auto_eval.sh` 负责完整生命周期。`lib/server_command_parser.py` 是内部解析器，
 通常不需要修改。
 
+同一台机器上的多个 `auto_eval.sh` 会在确认端口可绑定后获取对应的 `flock`，
+并持有端口锁直到服务和评测清理完成，避免并发实例同时选择范围内的最小端口。
+端口锁目录由 `PORT_LOCK_DIR` 配置，所有协作实例应使用同一个目录。
+
 服务启动后，等待器默认每 2 秒请求一次 `/health`。一旦服务返回健康状态，
 会立即启动 EvalScope；可通过 `HEALTH_CHECK_INTERVAL` 覆盖该间隔。
 

@@ -60,6 +60,7 @@ is_positive_integer() {
 : "${SHUTDOWN_TIMEOUT:=15}"
 : "${FAILURE_LOG_LINES:=100}"
 : "${GPU_LOCK_DIR:=/tmp/auto_eval_gpu_locks}"
+: "${PORT_LOCK_DIR:=/tmp/auto_eval_port_locks}"
 
 SERVER_COMMAND=$(resolve_from_script_dir "$SERVER_COMMAND")
 EVAL_COMMAND=$(resolve_from_script_dir "$EVAL_COMMAND")
@@ -104,7 +105,7 @@ done
 
 [[ -d "$MODEL_PATH" ]] || die "模型路径不存在：$MODEL_PATH"
 
-mkdir -p "$RESULT_ROOT" "$GPU_LOCK_DIR"
+mkdir -p "$RESULT_ROOT" "$GPU_LOCK_DIR" "$PORT_LOCK_DIR"
 
 SELF_PGID=$(python3 -c 'import os; print(os.getpgrp())')
 ATTEMPT_NO=0
@@ -117,9 +118,10 @@ SERVER_LOG=""
 EVAL_LOG=""
 SELECTED_GPUS=()
 GPU_LOCK_FDS=()
+PORT_LOCK_FD=""
 LAST_FREE_COUNT=0
 
-find_free_port() {
+query_free_ports() {
   python3 - "$HOST" "$START_PORT" "$END_PORT" <<'PY'
 import socket
 import sys
@@ -136,13 +138,37 @@ for port in range(start_port, end_port + 1):
         continue
     else:
         print(port)
-        raise SystemExit(0)
     finally:
         sock.close()
-
-print(f"错误：{start_port}-{end_port} 内没有可用端口", file=sys.stderr)
-raise SystemExit(1)
 PY
+}
+
+release_port_lock() {
+  if [[ -n "$PORT_LOCK_FD" ]]; then
+    flock -u "$PORT_LOCK_FD" 2>/dev/null || true
+    exec {PORT_LOCK_FD}>&- 2>/dev/null || true
+    PORT_LOCK_FD=""
+  fi
+  PORT=""
+}
+
+select_and_lock_port() {
+  local port lock_fd
+  local -a free_ports=()
+
+  release_port_lock
+  mapfile -t free_ports < <(query_free_ports)
+  for port in "${free_ports[@]}"; do
+    exec {lock_fd}>"${PORT_LOCK_DIR}/port_${HOST//[^A-Za-z0-9_.-]/_}_${port}.lock"
+    if flock -n "$lock_fd"; then
+      PORT=$port
+      PORT_LOCK_FD=$lock_fd
+      return 0
+    fi
+    exec {lock_fd}>&-
+  done
+
+  return 1
 }
 
 query_free_gpus() {
@@ -279,6 +305,7 @@ cleanup_current_attempt() {
   terminate_process_group " SGLang Server" "$SERVER_PID" "$SERVER_PGID"
   SERVER_PID=""
   SERVER_PGID=""
+  release_port_lock
   release_gpu_locks
 }
 
@@ -357,7 +384,7 @@ show_log_tail() {
 run_one_attempt() {
   local selected_csv time_tag status
 
-  if ! PORT=$(find_free_port); then
+  if ! select_and_lock_port; then
     log "本轮没有找到可用端口"
     return 1
   fi

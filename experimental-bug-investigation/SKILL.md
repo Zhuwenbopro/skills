@@ -3,6 +3,7 @@ name: experimental-bug-investigation
 description: '用可复现、可证伪的真实实验调查软件 Bug，并持续维护简洁证据报告。Use when: 用户提供异常现象、复现命令、失败请求、日志或测试案例，要求查 bug、定位根因、做对照实验、验证修复或形成 RCA；适用于启动失败、错误响应、错误输出、崩溃、卡死、资源问题和性能回归。'
 argument-hint: '粘贴现象、命令、请求、日志和期望行为'
 user-invocable: true
+disable-model-invocation: true
 ---
 
 # 实验驱动的 Bug 调查

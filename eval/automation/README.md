@@ -98,16 +98,21 @@ pgrep -af '[a]uto_eval\.sh'
 kill -TERM <启动时输出的 PID>
 ```
 
-收到 `TERM` 或 `INT` 后，脚本会停止本轮 EvalScope 和整个 SGLang 进程组，
+父进程只负责等待并锁定 GPU。成功锁卡后，它会启动一个独立 worker 并退出；
+worker 负责本轮 EvalScope 和 SGLang 生命周期，完成或失败后释放 GPU 锁。
+收到 `TERM` 或 `INT` 后，运行中的进程会停止本轮 EvalScope 和整个 SGLang 进程组，
 然后释放 GPU 锁。
 
 ## 失败处理
 
-以下情况都会清理资源并重新等卡：
+以下情况会由 worker 清理资源并结束本轮任务，不会重新等卡或重启：
 
 - 服务启动失败或超过启动超时。
 - EvalScope 返回非零退出状态。
 - 评测期间 SGLang Server 意外退出。
+
+只有 GPU 尚未成功锁定时才会继续等卡。`MAX_ATTEMPTS=0` 表示等卡无限尝试；
+设置为正整数时，限制等卡失败次数。成功锁卡并启动 worker 后，父进程不再重试。
 
 模型路径不存在、命令无法解析等静态错误会在进入循环前直接退出。
 

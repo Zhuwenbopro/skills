@@ -49,27 +49,27 @@ The user may provide:
    echo $!
    ```
 
-9. After starting the scheduler, wait with one blocking terminal watcher instead of repeatedly polling from the agent. The watcher must handle both successful startup and the first failed attempt. Return control to the agent as soon as the first failure marker appears; do not wait for the scheduler's later retries or its final retry limit. The scheduler may continue retrying in the background. Use a single command such as:
+9. After starting the scheduler, wait with one blocking terminal watcher instead of repeatedly polling from the agent. The parent scheduler retries only while it cannot lock the required GPUs. Once GPUs are locked, it starts one worker and exits; the worker runs exactly one server/evaluation lifecycle and never retries the lifecycle. Use a single command such as:
 
    ```bash
     tail -n 0 -F /home/eval_results/auto_eval.log | awk '
        /SGLang 服务健康检查通过/ { health=1 }
        /EvalScope 已启动/ { evalscope=1 }
        health && evalscope { exit 0 }
-      /SGLang Server 启动失败|SGLang Server 启动超过|第 [0-9]+ 次尝试失败|评测期间 SGLang Server 意外退出|EvalScope 评测失败|已达到最大尝试次数|错误：/ { exit 1 }
+      /SGLang Server 启动失败|SGLang Server 启动超过|评测期间 SGLang Server 意外退出|EvalScope 评测失败|已达到最大尝试次数|错误：/ { exit 1 }
     '
    ```
 
     Run this watcher asynchronously and let terminal completion/notification resume the agent. Do not repeatedly call `grep`, `tail`, `ps`, `get_terminal_output`, or other status checks while it is waiting. If the watcher exits successfully, stop monitoring and return control to the user:
    - `SGLang 服务健康检查通过`
    - `EvalScope 已启动`
-   If it exits with failure, report the first failure marker and that the scheduler may continue retrying in the background. Do not wait for later retries, and do not report benchmark completion.
-   Do not wait for benchmark completion, read intermediate `eval.log` output, or open generated reports during the initial run. Report the scheduler PID, result log, selected datasets, and that thinking is disabled.
-10. If the user asks for status, inspect the scheduler log and the latest run directory under `RESULT_ROOT`. Only then read progress logs or final reports. If the user asks to stop, send `TERM` to the scheduler PID; it will clean up the EvalScope process, SGLang process group, and GPU locks.
+   If it exits with failure, report the first failure marker. There is no later lifecycle retry.
+   Do not wait for benchmark completion, read intermediate `eval.log` output, or open generated reports during the initial run. Report the worker PID, result log, selected datasets, and that thinking is disabled.
+10. If the user asks for status, inspect the worker log and the latest run directory under `RESULT_ROOT`. Only then read progress logs or final reports. If the user asks to stop, send `TERM` to the worker PID; it will clean up the EvalScope process, SGLang process group, and GPU locks.
 
 ## Runtime Behavior
 
-The bundled [auto_eval.sh](./automation/auto_eval.sh) is responsible for waiting for free GPUs, locking them, selecting a free port, starting SGLang, checking `/health`, starting the bundled enhanced EvalScope client, cleaning up failures, and retrying. The scheduler remains running after the initial startup markers so it can finish the benchmark and clean up resources independently of the agent conversation. The enhanced client is integrated into [eval_command.sh](./automation/eval_command.sh). The parser is [server_command_parser.py](./automation/lib/server_command_parser.py), and the regression test is [test_retry.sh](./automation/tests/test_retry.sh).
+The bundled [auto_eval.sh](./automation/auto_eval.sh) waits for free GPUs and locks them. It then starts one worker and exits; the worker selects a port, starts SGLang, checks `/health`, starts the bundled enhanced EvalScope client, and cleans up the one lifecycle. GPU acquisition may retry indefinitely when `MAX_ATTEMPTS=0`; service or evaluation failure does not restart the lifecycle. The enhanced client is integrated into [eval_command.sh](./automation/eval_command.sh). The parser is [server_command_parser.py](./automation/lib/server_command_parser.py), and the regression test is [test_retry.sh](./automation/tests/test_retry.sh).
 
 The client passes dataset names directly to EvalScope, which resolves its built-in benchmark data. It also supports per-dataset arguments, per-dataset generation config overrides, `--limit`, and grouping datasets that share the same generation config. Do not require or create a local test-data directory for the standard built-in datasets.
 

@@ -56,7 +56,6 @@ is_positive_integer() {
 : "${GPU_POLL_INTERVAL:=30}"
 : "${GPU_CONFIRM_SECONDS:=3}"
 : "${GPU_ALLOWLIST:=}"
-: "${RETRY_INTERVAL:=30}"
 : "${MAX_ATTEMPTS:=0}"
 : "${SHUTDOWN_TIMEOUT:=15}"
 : "${FAILURE_LOG_LINES:=100}"
@@ -97,7 +96,7 @@ for value_name in TP_SIZE PP_SIZE REQUIRED_GPUS START_PORT END_PORT \
 done
 
 for value_name in GPU_VRAM_MAX_PERCENT GPU_HCU_MAX_PERCENT \
-  GPU_CONFIRM_SECONDS RETRY_INTERVAL MAX_ATTEMPTS; do
+  GPU_CONFIRM_SECONDS MAX_ATTEMPTS; do
   is_nonnegative_integer "${!value_name}" || die "$value_name 必须是非负整数"
 done
 
@@ -109,6 +108,7 @@ mkdir -p "$RESULT_ROOT" "$GPU_LOCK_DIR"
 
 SELF_PGID=$(python3 -c 'import os; print(os.getpgrp())')
 ATTEMPT_NO=0
+ACQUIRE_ATTEMPT_NO=0
 SERVER_PID=""
 SERVER_PGID=""
 EVAL_PID=""
@@ -402,6 +402,21 @@ run_one_attempt() {
   fi
 }
 
+run_worker() {
+  local status=0
+
+  if run_one_attempt; then
+    log "本轮评测完成"
+  else
+    status=$?
+    log "本轮评测失败（状态=${status}），worker 将结束且不重试"
+  fi
+
+  cleanup_current_attempt
+  trap - EXIT
+  exit "$status"
+}
+
 log "自动评测等待器启动"
 log "模型：${MODEL_NAME}（${MODEL_PATH}）"
 log "需要 GPU：${REQUIRED_GPUS} 张（TP=${TP_SIZE}, PP=${PP_SIZE}）"
@@ -409,7 +424,12 @@ log "需要 GPU：${REQUIRED_GPUS} 张（TP=${TP_SIZE}, PP=${PP_SIZE}）"
 
 while true; do
   if ! select_and_lock_gpus; then
+    ACQUIRE_ATTEMPT_NO=$((ACQUIRE_ATTEMPT_NO + 1))
     log "当前符合空闲标准的 GPU：${LAST_FREE_COUNT} 张；需要：${REQUIRED_GPUS} 张"
+    if ((MAX_ATTEMPTS > 0 && ACQUIRE_ATTEMPT_NO >= MAX_ATTEMPTS)); then
+      trap - EXIT
+      die "等卡达到最大尝试次数：${MAX_ATTEMPTS}"
+    fi
     sleep "$GPU_POLL_INTERVAL"
     continue
   fi
@@ -427,21 +447,10 @@ while true; do
   fi
 
   ATTEMPT_NO=$((ATTEMPT_NO + 1))
-  if run_one_attempt; then
-    cleanup_current_attempt
-    trap - EXIT
-    log "全部评测完成，脚本正常退出"
-    exit 0
-  else
-    status=$?
-    cleanup_current_attempt
-    log "第 ${ATTEMPT_NO} 次尝试失败（状态=${status}），资源已释放"
-  fi
-
-  if ((MAX_ATTEMPTS > 0 && ATTEMPT_NO >= MAX_ATTEMPTS)); then
-    trap - EXIT
-    die "已达到最大尝试次数：${MAX_ATTEMPTS}"
-  fi
-
-  sleep "$RETRY_INTERVAL"
+  log "已成功锁定 GPU：${SELECTED_GPUS[*]}，启动本轮 worker 后父进程退出"
+  run_worker &
+  WORKER_PID=$!
+  trap - EXIT
+  log "评测 worker 已启动：PID=${WORKER_PID}；父进程不再重试"
+  exit 0
 done

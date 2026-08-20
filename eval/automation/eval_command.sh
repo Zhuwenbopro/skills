@@ -47,7 +47,7 @@ declare -A dataset_configs_json=(
 )
 
 # 默认 generation_config 模板；__ENABLE_THINKING__ 由命令行 $1 / 默认值自动替换
-generation_config_template='{"timeout":120000,"max_tokens":13312,"temperature":0,"top_p":1,"extra_body":{"chat_template_kwargs":{"enable_thinking":__ENABLE_THINKING__}}}'
+generation_config_template='{"timeout":120000,"retries":1,"max_tokens":13312,"temperature":0,"top_p":1,"extra_body":{"chat_template_kwargs":{"enable_thinking":__ENABLE_THINKING__}}}'
 
 # 按数据集覆盖 generation_config（只写差异字段）
 declare -A dataset_generation_configs=(

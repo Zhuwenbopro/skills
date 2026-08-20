@@ -37,10 +37,6 @@ count=0
 [[ -f "$count_file" ]] && count=$(<"$count_file")
 count=$((count + 1))
 echo "$count" >"$count_file"
-if ((count == 1)); then
-  echo '模拟第一次服务启动失败'
-  exit 7
-fi
 touch "$TEST_STATE/healthy"
 trap 'rm -f "$TEST_STATE/healthy"; exit 0' TERM INT
 while true; do sleep 1; done
@@ -68,11 +64,8 @@ count=0
 [[ -f "$count_file" ]] && count=$(<"$count_file")
 count=$((count + 1))
 echo "$count" >"$count_file"
-if ((count == 1)); then
-  echo '模拟第一次评测失败'
-  exit 9
-fi
-echo '模拟第二次评测成功'
+echo '模拟评测失败'
+exit 9
 EOF
 
 chmod +x "$TEST_DIR/bin/rocm-smi" "$TEST_DIR/bin/curl" \
@@ -97,7 +90,6 @@ GPU_HCU_MAX_PERCENT=0
 GPU_POLL_INTERVAL=1
 GPU_CONFIRM_SECONDS=0
 GPU_ALLOWLIST=""
-RETRY_INTERVAL=0
 MAX_ATTEMPTS=4
 SHUTDOWN_TIMEOUT=2
 FAILURE_LOG_LINES=10
@@ -133,15 +125,21 @@ if [[ "$status" -ne 0 ]]; then
   cat "$TEST_DIR/runner.log" >&2
   exit 1
 fi
-[[ "$(<"$TEST_DIR/state/server_count")" -eq 3 ]]
-[[ "$(<"$TEST_DIR/state/eval_count")" -eq 2 ]]
+deadline=$((SECONDS + 15))
+while [[ ! -f "$TEST_DIR/state/eval_count" ]] && ((SECONDS < deadline)); do
+  sleep 1
+done
+[[ "$(<"$TEST_DIR/state/server_count")" -eq 1 ]]
+[[ "$(<"$TEST_DIR/state/eval_count")" -eq 1 ]]
 [[ "$(<"$TEST_DIR/state/server_gpus")" == "0" ]]
 grep -qx -- '31000' "$TEST_DIR/state/server_args"
 grep -qx -- 'model' "$TEST_DIR/state/server_args"
-! grep -qx -- '39999' "$TEST_DIR/state/server_args"
-grep -q '第 1 次尝试失败' "$TEST_DIR/runner.log"
-grep -q '第 2 次尝试失败' "$TEST_DIR/runner.log"
-grep -q '全部评测完成' "$TEST_DIR/runner.log"
+grep -q '启动本轮 worker 后父进程退出' "$TEST_DIR/runner.log"
+grep -q '父进程不再重试' "$TEST_DIR/runner.log"
+deadline=$((SECONDS + 15))
+while [[ -f "$TEST_DIR/state/healthy" ]] && ((SECONDS < deadline)); do
+  sleep 1
+done
 [[ ! -f "$TEST_DIR/state/healthy" ]]
 
-echo 'PASS: 参数解析、自动端口/GPU 覆盖、失败清理和重试均正常'
+echo 'PASS: 参数解析、自动端口/GPU 覆盖、单次 worker 执行和失败清理均正常'

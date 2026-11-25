@@ -1,0 +1,4 @@
+interface:
+  display_name: "模型服务压测"
+  short_description: "扫描 SGLang 模型服务并发档位，记录吞吐与延迟"
+  default_prompt: "使用 $model-bench 对指定 SGLang 服务扫描并发档位，保存吞吐、延迟和原始结果。"

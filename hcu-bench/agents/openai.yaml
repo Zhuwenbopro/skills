@@ -1,0 +1,4 @@
+interface:
+  display_name: "HCU 硬件基线"
+  short_description: "测量 HCU 的显存带宽、P2P 通信和 BF16/INT8 GEMM 基线"
+  default_prompt: "使用 $hcu-bench 识别指定 HCU 节点的型号并选择可用设备建立硬件性能基线，并保存可复用结果。"

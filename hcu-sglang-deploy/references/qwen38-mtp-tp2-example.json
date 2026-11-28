@@ -1,0 +1,55 @@
+{
+  "host": "hcu-node",
+  "container": "sglang-container",
+  "workdir": "/home",
+  "deployment_dir": "/workspace/sglang-deploy/runs/model-example",
+  "model_path": "/models/Qwen3.8-27B",
+  "served_model_name": "Qwen3.8-27B",
+  "devices": [
+    2,
+    5
+  ],
+  "python": "/workspace/sglang-deploy/venv/bin/python",
+  "pythonpath": [
+    "/workspace/sglang-deploy/src/adapter-das",
+    "/workspace/sglang-deploy/src/sglang/python",
+    "/workspace/sglang-deploy/src/sglang-plugin-das"
+  ],
+  "bind_host": "0.0.0.0",
+  "port": 30522,
+  "env": {
+    "HCU_ADAPTER_HOST": "sglang",
+    "SGLANG_PLUGINS": "hcu"
+  },
+  "launch_args": [
+    "--attention-backend",
+    "fa3",
+    "--linear-attn-backend",
+    "triton",
+    "--page-size",
+    "64",
+    "--mem-fraction-static",
+    "0.85",
+    "--context-length",
+    "8192",
+    "--max-running-requests",
+    "8",
+    "--disable-cuda-graph",
+    "--disable-custom-all-reduce",
+    "--watchdog-timeout",
+    "600",
+    "--speculative-algorithm",
+    "NEXTN",
+    "--speculative-num-steps",
+    "3",
+    "--speculative-eagle-topk",
+    "1",
+    "--speculative-num-draft-tokens",
+    "4"
+  ],
+  "verified_sources": {
+    "sglang": "baa9befa381511cd4d56f83980951e5a45fffc6d",
+    "adapter-das": "3ad198a3eefcf858ffa425ed1ff5f03543ab4391",
+    "sglang-plugin-das": "40dee477cc3e63e038f420e2365916a4921624a1"
+  }
+}

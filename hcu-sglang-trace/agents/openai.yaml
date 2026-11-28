@@ -1,0 +1,3 @@
+interface:
+  display_name: "HCU SGLang Trace"
+  short_description: "在 HCU/DTK 上抓取、校验并下载 SGLang CUDA Graph trace"

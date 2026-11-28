@@ -1,0 +1,4 @@
+interface:
+  display_name: "飞书工作周报"
+  short_description: "读取已配置的飞书汇报索引中最近七天的工作汇报，按项目汇总并附原文链接"
+  default_prompt: "用 $feishu-weekly-report 汇总最近七天的工作。"

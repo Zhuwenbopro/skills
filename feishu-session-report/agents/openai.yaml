@@ -1,0 +1,5 @@
+interface:
+  display_name: "飞书会话工作汇报"
+  default_prompt: "用 $feishu-session-report 将当前会话写成飞书会议简报，正文展示关键数据，并留存完整测试结果。"
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,6 @@
+interface:
+  display_name: "HCU SGLang 部署"
+  short_description: "从 SSH 和容器准备到海光 SGLang 模型服务启动与真实接口验收"
+  default_prompt: "使用 $hcu-sglang-deploy，按目标环境的配置完成指定节点和模型的容器准备、依赖安装、显存交接、启动及验收。"
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,4 @@
+interface:
+  display_name: "HCU 性能分析报告"
+  short_description: "分析服务器已有 trace 与硬件基线，按真实调用顺序生成简洁性能报告"
+  default_prompt: "使用 $hcu-performance-report 分析服务器已有 trace 和硬件基线，生成或更新简洁的性能报告。"

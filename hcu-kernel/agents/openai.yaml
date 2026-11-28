@@ -1,0 +1,4 @@
+interface:
+  display_name: "HCU 算子开发与调优"
+  short_description: "从访存地板和 ISA 入手，锁频逐点优化海光 HCU 算子并生成性能图"
+  default_prompt: "用 $hcu-kernel 在目标卡上开发或调优这个算子，先算地板，再逐点实测并给出延迟和加速比。"
